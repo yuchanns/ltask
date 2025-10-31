@@ -5,6 +5,10 @@
 #include <stdarg.h>
 #include <assert.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/threading.h>
+#endif
+
 #define CHUNKSIZE 8000
 
 struct log_item {
@@ -99,8 +103,12 @@ writefile_chunk(FILE *f, const char *name, struct log_chunk *c) {
 		memcpy(&header, ptr, sizeof(header));
 		ptr += sizeof(header);
 		sz -= sizeof(header);
+#if defined(__EMSCRIPTEN__)
+		emscripten_outf("[%08u:%s] %.*s\n", header.id, name, header.size, ptr);
+#else
 		fprintf(f, "[%08u:%s] %.*s\n", header.id, name, header.size, ptr);
 		fflush(f);
+#endif
 		ptr += header.size;
 		sz -= header.size;
 	}

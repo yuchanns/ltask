@@ -5,7 +5,7 @@
 #include <string.h>
 
 #if defined(__EMSCRIPTEN__)
-#include <emscripten/emscripten.h>
+#include <emscripten/wasm_worker.h>
 #endif
 
 static int
