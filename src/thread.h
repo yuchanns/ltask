@@ -117,6 +117,126 @@ thread_wait(void *pid) {
 	WaitForSingleObject(h, INFINITE);
 }
 
+#elif defined(__EMSCRIPTEN__)
+
+#include <emscripten/emscripten.h>
+#include <emscripten/threading.h>
+#include <emscripten/wasm_worker.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#ifndef WASM_STACK_SIZE
+#define WASM_STACK_SIZE (64 * 1024)
+#endif
+
+#define thread_setname(NAME)
+
+#define thread_setnamef(...)
+
+struct wasm_worker_context {
+  struct thread *thread;
+  emscripten_semaphore_t *semaphore;
+};
+
+struct wasm_thread_group {
+  emscripten_wasm_worker_t *workers;
+  struct wasm_worker_context *contexts;
+  emscripten_semaphore_t semaphore;
+};
+
+static inline void
+thread_function(int arg) {
+  struct wasm_worker_context *ctx = (struct wasm_worker_context *)(intptr_t)arg;
+  ctx->thread->func(ctx->thread->ud);
+  emscripten_semaphore_release(ctx->semaphore, 1);
+}
+
+static void
+wasm_thread_group_destroy(struct wasm_thread_group *group, int worker_count) {
+  if (!group) {
+    return;
+  }
+  if (group->workers) {
+    for (int i = 0; i < worker_count; ++i) {
+      if (group->workers[i] > 0) {
+        emscripten_terminate_wasm_worker(group->workers[i]);
+      }
+    }
+    free(group->workers);
+  }
+  if (group->contexts) {
+    free(group->contexts);
+  }
+  free(group);
+}
+
+static inline void *
+thread_start(struct thread *threads, int n, int usemainthread) {
+  if (usemainthread) {
+    emscripten_outf("usemainthread is not supported, use mainthread_api instead\n");
+  }
+
+  struct wasm_thread_group *group =
+      (struct wasm_thread_group *)malloc(sizeof(*group));
+  if (!group) {
+    return NULL;
+  }
+  group->workers = NULL;
+  group->contexts = NULL;
+
+  emscripten_semaphore_init(&group->semaphore, 0);
+  if (n <= 0) {
+    return group;
+  }
+
+  group->workers =
+      (emscripten_wasm_worker_t *)malloc(n * sizeof(emscripten_wasm_worker_t));
+  group->contexts = (struct wasm_worker_context *)malloc(
+      n * sizeof(struct wasm_worker_context));
+  if (!group->workers || !group->contexts) {
+    wasm_thread_group_destroy(group, 0);
+    return NULL;
+  }
+
+  for (int i = 0; i < n; ++i) {
+    group->contexts[i].thread = &threads[i];
+    group->contexts[i].semaphore = &group->semaphore;
+    emscripten_wasm_worker_t worker =
+        emscripten_malloc_wasm_worker(WASM_STACK_SIZE);
+    if (worker <= 0) {
+      wasm_thread_group_destroy(group, i);
+      return NULL;
+    }
+    group->workers[i] = worker;
+    emscripten_wasm_worker_post_function_vi(worker, thread_function,
+                                            (int)(intptr_t)&group->contexts[i]);
+  }
+
+  return group;
+}
+
+static inline void
+thread_join(void *handle, int n) {
+  struct wasm_thread_group *group = (struct wasm_thread_group *)handle;
+  if (!group) {
+    return;
+  }
+
+  while (emscripten_semaphore_try_acquire(&group->semaphore, n) == -1);
+
+  wasm_thread_group_destroy(group, n);
+}
+
+static inline void *
+thread_run(struct thread thread) {
+  return thread_start(&thread, 1, 0);
+}
+
+static inline void 
+thread_wait(void *pid) {
+  return thread_join(pid, 1);
+}
+
 #else
 
 #include <pthread.h>
