@@ -4,6 +4,10 @@
 #include <lauxlib.h>
 #include <string.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#endif
+
 static int
 config_getint(lua_State *L, int index, const char *key, int opt) {
 	int t = lua_getfield(L, index, key);
@@ -32,7 +36,11 @@ void
 config_load(lua_State *L, int index, struct ltask_config *config) {
 	luaL_checktype(L, index, LUA_TTABLE);
 	config->worker = config_getint(L, index, "worker", 0);
+#ifndef __EMSCRIPTEN__
 	int ncores = sysinfo_ncores();
+#else
+  int ncores = emscripten_navigator_hardware_concurrency();
+#endif
 	if (ncores <= 1) {
 		luaL_error(L, "Need at least 2 cores");
 		return;

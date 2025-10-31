@@ -54,6 +54,61 @@ cond_wait(struct cond *c) {
         SleepConditionVariableSRW(&c->c, &c->lock, INFINITE, 0);
 }
 
+#elif defined(__EMSCRIPTEN__)
+
+#include <emscripten/wasm_worker.h>
+
+struct cond {
+    emscripten_condvar_t c;
+    emscripten_lock_t lock;
+    int flag;
+};
+
+static inline void
+cond_create(struct cond *c) {
+    emscripten_lock_init(&c->lock);
+    emscripten_condvar_init(&c->c);
+    c->flag = 0;
+}
+
+static inline void
+cond_release(struct cond *c) {
+    (void)c;
+}
+
+static inline void
+cond_trigger_begin(struct cond *c) {
+    emscripten_lock_waitinf_acquire(&c->lock);
+    c->flag = 1;
+}
+
+static inline void
+cond_trigger_end(struct cond *c, int trigger) {
+    if (trigger) {
+        emscripten_condvar_signal(&c->c, 1);
+    } else {
+        c->flag = 0;
+    }
+    emscripten_lock_release(&c->lock);
+}
+
+static inline void
+cond_wait_begin(struct cond *c) {
+    emscripten_lock_waitinf_acquire(&c->lock);
+}
+
+static inline void
+cond_wait_end(struct cond *c) {
+    c->flag = 0;
+    emscripten_lock_release(&c->lock);
+}
+
+static inline void
+cond_wait(struct cond *c) {
+    while (!c->flag)
+        emscripten_condvar_waitinf(&c->c, &c->lock);
+}
+
 #else
 
 #include <pthread.h>
