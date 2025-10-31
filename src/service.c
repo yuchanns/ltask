@@ -398,8 +398,26 @@ service_loadstring(struct service_pool *p, service_id id, const char *source, si
 	return NULL;
 }
 
+#if defined(__EMSCRIPTEN__)
+
+#include <emscripten/threading.h>
+
+static inline void
+writestringerror(const char *fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    emscripten_console_error(buf);
+}
+
+#else
+
 #define writestringerror(s,p) \
 	(fprintf(stderr, (s), (p)), fflush(stderr))
+
+#endif
 
 int
 service_resume(struct service_pool *p, service_id id) {
